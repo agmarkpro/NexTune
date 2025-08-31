@@ -1,9 +1,9 @@
 import { Suggestion, Song, SearchOptions } from '../types/music';
 
-const CORS_PROXY = 'https://cors-anywhere.herokuapp.com/';
+const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
 const CHOSIC_SUGGESTIONS_URL = 'https://www.chosic.com/wp-admin/admin-ajax.php';
 const CHOSIC_PLAYLIST_URL = 'https://www.chosic.com/playlist-generator/';
-const CORS_DEMO_URL = 'https://cors-anywhere.herokuapp.com/corsdemo';
+const CORS_DEMO_URL = 'https://allorigins.win/';
 
 // Mock data for when CORS is not available
 const mockSuggestions: Record<string, Suggestion[]> = {
@@ -63,11 +63,8 @@ const mockPlaylistData: Song[] = [
 
 async function checkCorsProxy(): Promise<boolean> {
   try {
-    const response = await fetch(`${CORS_PROXY}https://httpbin.org/get`, {
+    const response = await fetch(`${CORS_PROXY}${encodeURIComponent('https://httpbin.org/get')}`, {
       method: 'GET',
-      headers: {
-        'X-Requested-With': 'XMLHttpRequest',
-      },
     });
     return response.ok;
   } catch (error) {
@@ -100,11 +97,8 @@ export async function getSuggestions(query: string, type: string): Promise<Sugge
     formData.append('q', query);
     formData.append('type', type);
 
-    const response = await fetch(`${CORS_PROXY}${CHOSIC_SUGGESTIONS_URL}`, {
+    const response = await fetch(`${CORS_PROXY}${encodeURIComponent(CHOSIC_SUGGESTIONS_URL)}`, {
       method: 'POST',
-      headers: {
-        'X-Requested-With': 'XMLHttpRequest',
-      },
       body: formData,
     });
 
@@ -143,11 +137,7 @@ export async function generatePlaylist(options: SearchOptions): Promise<Song[]> 
       url += `?q=${encodeURIComponent(options.query)}&type=${options.type}`;
     }
 
-    const response = await fetch(`${CORS_PROXY}${url}`, {
-      headers: {
-        'X-Requested-With': 'XMLHttpRequest',
-      },
-    });
+    const response = await fetch(`${CORS_PROXY}${encodeURIComponent(url)}`);
 
     if (!response.ok) {
       throw new Error('CORS_NOT_ACTIVATED');
