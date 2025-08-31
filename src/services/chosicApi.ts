@@ -17,13 +17,11 @@ class ApiResponseFormatError extends Error {
 
 // Multiple CORS proxy services for automatic fallback
 const CORS_PROXIES = [
-  'https://api.allorigins.win/raw?url=',
+  'https://api.allorigins.win/get?url=',
   'https://corsproxy.io/?',
-  'https://cors-anywhere.herokuapp.com/',
   'https://api.codetabs.com/v1/proxy?quest='
 ];
 
-const CHOSIC_SUGGESTIONS_URL = 'https://www.chosic.com/wp-admin/admin-ajax.php';
 const CHOSIC_PLAYLIST_URL = 'https://www.chosic.com/playlist-generator/';
 
 // Track which proxy is currently working
@@ -39,7 +37,9 @@ const mockSuggestions: Record<string, Suggestion[]> = {
     { value: 'Sweet Child O Mine', label: 'Sweet Child O Mine - Guns N Roses' },
     { value: 'Yesterday', label: 'Yesterday - The Beatles' },
     { value: 'Smells Like Teen Spirit', label: 'Smells Like Teen Spirit - Nirvana' },
-    { value: 'Billie Jean', label: 'Billie Jean - Michael Jackson' }
+    { value: 'Billie Jean', label: 'Billie Jean - Michael Jackson' },
+    { value: 'Like a Rolling Stone', label: 'Like a Rolling Stone - Bob Dylan' },
+    { value: 'Purple Haze', label: 'Purple Haze - Jimi Hendrix' }
   ],
   'artist': [
     { value: 'The Beatles', label: 'The Beatles' },
@@ -49,7 +49,9 @@ const mockSuggestions: Record<string, Suggestion[]> = {
     { value: 'The Rolling Stones', label: 'The Rolling Stones' },
     { value: 'Michael Jackson', label: 'Michael Jackson' },
     { value: 'Nirvana', label: 'Nirvana' },
-    { value: 'Bob Dylan', label: 'Bob Dylan' }
+    { value: 'Bob Dylan', label: 'Bob Dylan' },
+    { value: 'Jimi Hendrix', label: 'Jimi Hendrix' },
+    { value: 'Elvis Presley', label: 'Elvis Presley' }
   ]
 };
 
@@ -109,6 +111,20 @@ const mockPlaylistData: Song[] = [
     artist: 'Michael Jackson',
     youtubeUrl: 'https://www.youtube.com/watch?v=Zi_XLOBDo_Y',
     youtubeId: 'Zi_XLOBDo_Y'
+  },
+  {
+    id: '9',
+    title: 'Like a Rolling Stone',
+    artist: 'Bob Dylan',
+    youtubeUrl: 'https://www.youtube.com/watch?v=IwOfCgkyEj0',
+    youtubeId: 'IwOfCgkyEj0'
+  },
+  {
+    id: '10',
+    title: 'Purple Haze',
+    artist: 'Jimi Hendrix',
+    youtubeUrl: 'https://www.youtube.com/watch?v=WGoDaYjdfSg',
+    youtubeId: 'WGoDaYjdfSg'
   }
 ];
 
@@ -151,39 +167,28 @@ async function isValidJsonResponse(response: Response): Promise<boolean> {
 }
 
 export function activateCorsProxy(): void {
-  // Open multiple proxy services to ensure at least one is activated
-  CORS_PROXIES.forEach((proxy, index) => {
-    setTimeout(() => {
-      if (proxy.includes('allorigins.win')) {
-        window.open('https://allorigins.win/', '_blank', 'noopener,noreferrer');
-      } else if (proxy.includes('cors-anywhere.herokuapp.com')) {
-        window.open('https://cors-anywhere.herokuapp.com/corsdemo', '_blank', 'noopener,noreferrer');
-      }
-    }, index * 1000); // Stagger the opens
-  });
+  // Open AllOrigins demo page
+  window.open('https://allorigins.win/', '_blank', 'noopener,noreferrer');
 }
 
 export async function getSuggestions(query: string, type: string): Promise<Suggestion[]> {
   if (query.length < 2) return [];
 
   try {
-    const formData = new FormData();
-    formData.append('action', 'get_suggestions');
-    formData.append('q', query);
-    formData.append('type', type);
-
-    const response = await tryWithProxy(CHOSIC_SUGGESTIONS_URL, {
-      method: 'POST',
-      body: formData,
-    });
-
-    // Check if response is valid JSON
-    if (!(await isValidJsonResponse(response))) {
-      throw new ApiResponseFormatError('API returned HTML instead of JSON. The service may be unavailable.');
+    // Use the playlist generator page to get suggestions by simulating the search
+    const searchUrl = `${CHOSIC_PLAYLIST_URL}?q=${encodeURIComponent(query)}&type=${type}`;
+    
+    const response = await tryWithProxy(searchUrl);
+    const html = await response.text();
+    
+    // Parse suggestions from the HTML response
+    const suggestions = parseSuggestionsFromHtml(html, query, type);
+    
+    if (suggestions.length === 0) {
+      throw new ApiResponseFormatError('No suggestions found in response');
     }
-
-    const data = await response.json();
-    return Array.isArray(data) ? data : [];
+    
+    return suggestions;
   } catch (error) {
     console.error('Error fetching suggestions:', error);
     
@@ -207,8 +212,6 @@ export async function generatePlaylist(options: SearchOptions): Promise<Song[]> 
     }
 
     const response = await tryWithProxy(url);
-
-    // For playlist generation, we expect HTML response
     const html = await response.text();
     
     // Try to parse the HTML response
@@ -232,38 +235,94 @@ export async function generatePlaylist(options: SearchOptions): Promise<Song[]> 
   }
 }
 
+function parseSuggestionsFromHtml(html: string, query: string, type: string): Suggestion[] {
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    
+    // Look for suggestions in various possible containers
+    const suggestionSelectors = [
+      '#form-suggestions .suggestion',
+      '.suggestion-item',
+      '.autocomplete-suggestion',
+      '[data-suggestion]'
+    ];
+    
+    const suggestions: Suggestion[] = [];
+    
+    for (const selector of suggestionSelectors) {
+      const elements = doc.querySelectorAll(selector);
+      elements.forEach(element => {
+        const text = element.textContent?.trim();
+        if (text && text.toLowerCase().includes(query.toLowerCase())) {
+          suggestions.push({
+            value: text,
+            label: text
+          });
+        }
+      });
+      
+      if (suggestions.length > 0) break;
+    }
+    
+    return suggestions.slice(0, 8); // Limit to 8 suggestions
+  } catch (error) {
+    console.error('Error parsing suggestions from HTML:', error);
+    return [];
+  }
+}
+
 function parseMusicFromHtml(html: string): Song[] {
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
-    const musicItems = doc.querySelectorAll('.pl-item');
+    
+    // Multiple selectors to try for different page layouts
+    const musicSelectors = [
+      '.pl-item',
+      '.playlist-item',
+      '.song-item',
+      '.track-item',
+      '[data-song]'
+    ];
     
     const songs: Song[] = [];
 
-    musicItems.forEach((item, index) => {
-      const titleElement = item.querySelector('.song-title');
-      const artistElement = item.querySelector('.artist-name');
-      const youtubeLinkElement = item.querySelector('a[href*="youtube.com"]');
+    for (const selector of musicSelectors) {
+      const musicItems = doc.querySelectorAll(selector);
+      
+      musicItems.forEach((item, index) => {
+        const titleElement = item.querySelector('.song-title, .title, h3, h4');
+        const artistElement = item.querySelector('.artist-name, .artist, .by');
+        const youtubeLinkElement = item.querySelector('a[href*="youtube.com"], a[href*="youtu.be"]');
 
-      if (titleElement && artistElement && youtubeLinkElement) {
-        const title = titleElement.textContent?.trim() || '';
-        const artist = artistElement.textContent?.trim() || '';
-        const youtubeUrl = youtubeLinkElement.getAttribute('href') || '';
-        
-        const youtubeIdMatch = youtubeUrl.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/);
-        const youtubeId = youtubeIdMatch ? youtubeIdMatch[1] : '';
+        if (titleElement && artistElement) {
+          const title = titleElement.textContent?.trim() || '';
+          const artist = artistElement.textContent?.trim() || '';
+          
+          let youtubeUrl = '';
+          let youtubeId = '';
+          
+          if (youtubeLinkElement) {
+            youtubeUrl = youtubeLinkElement.getAttribute('href') || '';
+            const youtubeIdMatch = youtubeUrl.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/);
+            youtubeId = youtubeIdMatch ? youtubeIdMatch[1] : '';
+          }
 
-        if (title && artist && youtubeId) {
-          songs.push({
-            id: `${index}-${youtubeId}`,
-            title,
-            artist,
-            youtubeUrl,
-            youtubeId,
-          });
+          if (title && artist) {
+            songs.push({
+              id: `${index}-${youtubeId || Date.now()}`,
+              title,
+              artist,
+              youtubeUrl: youtubeUrl || `https://www.youtube.com/results?search_query=${encodeURIComponent(`${title} ${artist}`)}`,
+              youtubeId: youtubeId || '',
+            });
+          }
         }
-      }
-    });
+      });
+      
+      if (songs.length > 0) break;
+    }
 
     return songs;
   } catch (error) {
