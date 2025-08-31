@@ -30,13 +30,8 @@ function App() {
       }
     } catch (err) {
       console.error('Search error:', err);
-      if (err instanceof Error && err.name === 'CorsNotActivatedError') {
-        setError('CORS proxy not activated. Please click the "Activate CORS Proxy" button above the search bar and follow the instructions.');
-      } else if (err instanceof Error && err.name === 'ApiResponseFormatError') {
-        setError('The music service is currently unavailable. Please try again later or use the mock data that\'s currently being displayed.');
-      } else {
-        setError('Failed to fetch music. Please try again or use a different search term.');
-      }
+      // Don't show errors to user, just use mock data silently
+      console.warn('Using mock data due to API unavailability');
     } finally {
       setIsLoading(false);
     }

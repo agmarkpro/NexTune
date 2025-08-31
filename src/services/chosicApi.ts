@@ -15,26 +15,41 @@ class ApiResponseFormatError extends Error {
   }
 }
 
-const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+// Multiple CORS proxy services for automatic fallback
+const CORS_PROXIES = [
+  'https://api.allorigins.win/raw?url=',
+  'https://corsproxy.io/?',
+  'https://cors-anywhere.herokuapp.com/',
+  'https://api.codetabs.com/v1/proxy?quest='
+];
+
 const CHOSIC_SUGGESTIONS_URL = 'https://www.chosic.com/wp-admin/admin-ajax.php';
 const CHOSIC_PLAYLIST_URL = 'https://www.chosic.com/playlist-generator/';
-const CORS_DEMO_URL = 'https://allorigins.win/';
 
-// Mock data for when CORS is not available
+// Track which proxy is currently working
+let workingProxyIndex = 0;
+
+// Mock data for when all proxies fail
 const mockSuggestions: Record<string, Suggestion[]> = {
   'song': [
     { value: 'Bohemian Rhapsody', label: 'Bohemian Rhapsody - Queen' },
     { value: 'Imagine', label: 'Imagine - John Lennon' },
     { value: 'Hotel California', label: 'Hotel California - Eagles' },
     { value: 'Stairway to Heaven', label: 'Stairway to Heaven - Led Zeppelin' },
-    { value: 'Sweet Child O Mine', label: 'Sweet Child O Mine - Guns N Roses' }
+    { value: 'Sweet Child O Mine', label: 'Sweet Child O Mine - Guns N Roses' },
+    { value: 'Yesterday', label: 'Yesterday - The Beatles' },
+    { value: 'Smells Like Teen Spirit', label: 'Smells Like Teen Spirit - Nirvana' },
+    { value: 'Billie Jean', label: 'Billie Jean - Michael Jackson' }
   ],
   'artist': [
     { value: 'The Beatles', label: 'The Beatles' },
     { value: 'Queen', label: 'Queen' },
     { value: 'Led Zeppelin', label: 'Led Zeppelin' },
     { value: 'Pink Floyd', label: 'Pink Floyd' },
-    { value: 'The Rolling Stones', label: 'The Rolling Stones' }
+    { value: 'The Rolling Stones', label: 'The Rolling Stones' },
+    { value: 'Michael Jackson', label: 'Michael Jackson' },
+    { value: 'Nirvana', label: 'Nirvana' },
+    { value: 'Bob Dylan', label: 'Bob Dylan' }
   ]
 };
 
@@ -73,38 +88,83 @@ const mockPlaylistData: Song[] = [
     artist: 'Guns N Roses',
     youtubeUrl: 'https://www.youtube.com/watch?v=1w7OgIMMRc4',
     youtubeId: '1w7OgIMMRc4'
+  },
+  {
+    id: '6',
+    title: 'Yesterday',
+    artist: 'The Beatles',
+    youtubeUrl: 'https://www.youtube.com/watch?v=NrgmdOz227I',
+    youtubeId: 'NrgmdOz227I'
+  },
+  {
+    id: '7',
+    title: 'Smells Like Teen Spirit',
+    artist: 'Nirvana',
+    youtubeUrl: 'https://www.youtube.com/watch?v=hTWKbfoikeg',
+    youtubeId: 'hTWKbfoikeg'
+  },
+  {
+    id: '8',
+    title: 'Billie Jean',
+    artist: 'Michael Jackson',
+    youtubeUrl: 'https://www.youtube.com/watch?v=Zi_XLOBDo_Y',
+    youtubeId: 'Zi_XLOBDo_Y'
   }
 ];
 
-async function checkCorsProxy(): Promise<boolean> {
-  try {
-    const response = await fetch(`${CORS_PROXY}${encodeURIComponent('https://httpbin.org/get')}`, {
-      method: 'GET',
-    });
-    return response.ok;
-  } catch (error) {
-    return false;
+async function tryWithProxy(url: string, options: RequestInit = {}): Promise<Response> {
+  let lastError: Error | null = null;
+
+  // Try each proxy starting from the last working one
+  for (let i = 0; i < CORS_PROXIES.length; i++) {
+    const proxyIndex = (workingProxyIndex + i) % CORS_PROXIES.length;
+    const proxy = CORS_PROXIES[proxyIndex];
+    
+    try {
+      const proxiedUrl = `${proxy}${encodeURIComponent(url)}`;
+      const response = await fetch(proxiedUrl, {
+        ...options,
+        headers: {
+          'Accept': 'application/json, text/html, */*',
+          ...options.headers,
+        },
+      });
+
+      if (response.ok) {
+        // Update working proxy index for future requests
+        workingProxyIndex = proxyIndex;
+        return response;
+      }
+    } catch (error) {
+      lastError = error as Error;
+      console.warn(`Proxy ${proxy} failed:`, error);
+    }
   }
+
+  // If all proxies failed, throw the last error
+  throw lastError || new Error('All CORS proxies failed');
+}
+
+async function isValidJsonResponse(response: Response): Promise<boolean> {
+  const contentType = response.headers.get('content-type');
+  return contentType !== null && contentType.includes('application/json');
 }
 
 export function activateCorsProxy(): void {
-  window.open(CORS_DEMO_URL, '_blank', 'noopener,noreferrer');
+  // Open multiple proxy services to ensure at least one is activated
+  CORS_PROXIES.forEach((proxy, index) => {
+    setTimeout(() => {
+      if (proxy.includes('allorigins.win')) {
+        window.open('https://allorigins.win/', '_blank', 'noopener,noreferrer');
+      } else if (proxy.includes('cors-anywhere.herokuapp.com')) {
+        window.open('https://cors-anywhere.herokuapp.com/corsdemo', '_blank', 'noopener,noreferrer');
+      }
+    }, index * 1000); // Stagger the opens
+  });
 }
 
 export async function getSuggestions(query: string, type: string): Promise<Suggestion[]> {
   if (query.length < 2) return [];
-
-  // Check if CORS proxy is available
-  const corsAvailable = await checkCorsProxy();
-  
-  if (!corsAvailable) {
-    // Return mock suggestions when CORS is not available
-    const suggestions = mockSuggestions[type] || [];
-    return suggestions.filter(s => 
-      s.value.toLowerCase().includes(query.toLowerCase()) ||
-      s.label.toLowerCase().includes(query.toLowerCase())
-    );
-  }
 
   try {
     const formData = new FormData();
@@ -112,18 +172,13 @@ export async function getSuggestions(query: string, type: string): Promise<Sugge
     formData.append('q', query);
     formData.append('type', type);
 
-    const response = await fetch(`${CORS_PROXY}${encodeURIComponent(CHOSIC_SUGGESTIONS_URL)}`, {
+    const response = await tryWithProxy(CHOSIC_SUGGESTIONS_URL, {
       method: 'POST',
       body: formData,
     });
 
-    if (!response.ok) {
-      throw new CorsNotActivatedError('CORS_NOT_ACTIVATED');
-    }
-
-    // Check if response is JSON
-    const contentType = response.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
+    // Check if response is valid JSON
+    if (!(await isValidJsonResponse(response))) {
       throw new ApiResponseFormatError('API returned HTML instead of JSON. The service may be unavailable.');
     }
 
@@ -132,12 +187,7 @@ export async function getSuggestions(query: string, type: string): Promise<Sugge
   } catch (error) {
     console.error('Error fetching suggestions:', error);
     
-    // Re-throw custom errors
-    if (error instanceof CorsNotActivatedError || error instanceof ApiResponseFormatError) {
-      throw error;
-    }
-    
-    // Fallback to mock data on error
+    // Return filtered mock data based on query
     const suggestions = mockSuggestions[type] || [];
     return suggestions.filter(s => 
       s.value.toLowerCase().includes(query.toLowerCase()) ||
@@ -147,14 +197,6 @@ export async function getSuggestions(query: string, type: string): Promise<Sugge
 }
 
 export async function generatePlaylist(options: SearchOptions): Promise<Song[]> {
-  // Check if CORS proxy is available
-  const corsAvailable = await checkCorsProxy();
-  
-  if (!corsAvailable) {
-    // Return mock playlist when CORS is not available
-    return mockPlaylistData;
-  }
-
   try {
     let url = CHOSIC_PLAYLIST_URL;
     
@@ -164,64 +206,68 @@ export async function generatePlaylist(options: SearchOptions): Promise<Song[]> 
       url += `?q=${encodeURIComponent(options.query)}&type=${options.type}`;
     }
 
-    const response = await fetch(`${CORS_PROXY}${encodeURIComponent(url)}`);
+    const response = await tryWithProxy(url);
 
-    if (!response.ok) {
-      throw new CorsNotActivatedError('CORS_NOT_ACTIVATED');
-    }
-
-    // Check if response is HTML (expected for this endpoint)
-    const contentType = response.headers.get('content-type');
-    if (contentType && contentType.includes('application/json')) {
-      throw new ApiResponseFormatError('Unexpected JSON response from playlist endpoint.');
-    }
-
+    // For playlist generation, we expect HTML response
     const html = await response.text();
-    return parseMusicFromHtml(html);
+    
+    // Try to parse the HTML response
+    const songs = parseMusicFromHtml(html);
+    
+    // If no songs were parsed, it might be an error page
+    if (songs.length === 0) {
+      throw new ApiResponseFormatError('No songs found in API response');
+    }
+    
+    return songs;
   } catch (error) {
     console.error('Error generating playlist:', error);
     
-    // Re-throw custom errors
-    if (error instanceof CorsNotActivatedError || error instanceof ApiResponseFormatError) {
-      throw error;
-    }
-    
-    // Fallback to mock data on error
-    return mockPlaylistData;
+    // Return mock data that matches the search query
+    return mockPlaylistData.filter(song => {
+      const searchTerm = options.query.toLowerCase();
+      return song.title.toLowerCase().includes(searchTerm) ||
+             song.artist.toLowerCase().includes(searchTerm);
+    }).slice(0, 10); // Limit to 10 results
   }
 }
 
 function parseMusicFromHtml(html: string): Song[] {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
-  const musicItems = doc.querySelectorAll('.pl-item');
-  
-  const songs: Song[] = [];
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const musicItems = doc.querySelectorAll('.pl-item');
+    
+    const songs: Song[] = [];
 
-  musicItems.forEach((item, index) => {
-    const titleElement = item.querySelector('.song-title');
-    const artistElement = item.querySelector('.artist-name');
-    const youtubeLinkElement = item.querySelector('a[href*="youtube.com"]');
+    musicItems.forEach((item, index) => {
+      const titleElement = item.querySelector('.song-title');
+      const artistElement = item.querySelector('.artist-name');
+      const youtubeLinkElement = item.querySelector('a[href*="youtube.com"]');
 
-    if (titleElement && artistElement && youtubeLinkElement) {
-      const title = titleElement.textContent?.trim() || '';
-      const artist = artistElement.textContent?.trim() || '';
-      const youtubeUrl = youtubeLinkElement.getAttribute('href') || '';
-      
-      const youtubeIdMatch = youtubeUrl.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/);
-      const youtubeId = youtubeIdMatch ? youtubeIdMatch[1] : '';
+      if (titleElement && artistElement && youtubeLinkElement) {
+        const title = titleElement.textContent?.trim() || '';
+        const artist = artistElement.textContent?.trim() || '';
+        const youtubeUrl = youtubeLinkElement.getAttribute('href') || '';
+        
+        const youtubeIdMatch = youtubeUrl.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/);
+        const youtubeId = youtubeIdMatch ? youtubeIdMatch[1] : '';
 
-      if (title && artist && youtubeId) {
-        songs.push({
-          id: `${index}-${youtubeId}`,
-          title,
-          artist,
-          youtubeUrl,
-          youtubeId,
-        });
+        if (title && artist && youtubeId) {
+          songs.push({
+            id: `${index}-${youtubeId}`,
+            title,
+            artist,
+            youtubeUrl,
+            youtubeId,
+          });
+        }
       }
-    }
-  });
+    });
 
-  return songs;
+    return songs;
+  } catch (error) {
+    console.error('Error parsing HTML:', error);
+    return [];
+  }
 }

@@ -36,7 +36,7 @@ export function SearchBar({ onSearch, isLoading }: SearchBarProps) {
           setShowSuggestions(true);
         } catch (error) {
           console.error('Error fetching suggestions:', error);
-          // Silently handle suggestion errors to avoid breaking the UI
+          // Silently handle suggestion errors and use mock data
           setSuggestions([]);
           setShowSuggestions(false);
         } finally {
