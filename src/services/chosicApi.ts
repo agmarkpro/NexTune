@@ -242,10 +242,10 @@ function parseSuggestionsFromHtml(html: string, query: string, type: string): Su
     
     // Look for suggestions in various possible containers
     const suggestionSelectors = [
-      '#form-suggestions .suggestion',
-      '.suggestion-item',
-      '.autocomplete-suggestion',
-      '[data-suggestion]'
+      '#form-suggestions .span-class',
+      '#form-suggestions span',
+      '.span-class',
+      '.suggestion-item'
     ];
     
     const suggestions: Suggestion[] = [];
@@ -254,10 +254,12 @@ function parseSuggestionsFromHtml(html: string, query: string, type: string): Su
       const elements = doc.querySelectorAll(selector);
       elements.forEach(element => {
         const text = element.textContent?.trim();
-        if (text && text.toLowerCase().includes(query.toLowerCase())) {
+        if (text) {
+          // Extract song title and artist from the text content
+          const cleanText = text.replace(/\s+/g, ' ').trim();
           suggestions.push({
-            value: text,
-            label: text
+            value: cleanText,
+            label: cleanText
           });
         }
       });
