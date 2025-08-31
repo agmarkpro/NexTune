@@ -1,5 +1,20 @@
 import { Suggestion, Song, SearchOptions } from '../types/music';
 
+// Custom error classes for better error handling
+class CorsNotActivatedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CorsNotActivatedError';
+  }
+}
+
+class ApiResponseFormatError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ApiResponseFormatError';
+  }
+}
+
 const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
 const CHOSIC_SUGGESTIONS_URL = 'https://www.chosic.com/wp-admin/admin-ajax.php';
 const CHOSIC_PLAYLIST_URL = 'https://www.chosic.com/playlist-generator/';
@@ -103,13 +118,25 @@ export async function getSuggestions(query: string, type: string): Promise<Sugge
     });
 
     if (!response.ok) {
-      throw new Error('CORS_NOT_ACTIVATED');
+      throw new CorsNotActivatedError('CORS_NOT_ACTIVATED');
+    }
+
+    // Check if response is JSON
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      throw new ApiResponseFormatError('API returned HTML instead of JSON. The service may be unavailable.');
     }
 
     const data = await response.json();
     return Array.isArray(data) ? data : [];
   } catch (error) {
     console.error('Error fetching suggestions:', error);
+    
+    // Re-throw custom errors
+    if (error instanceof CorsNotActivatedError || error instanceof ApiResponseFormatError) {
+      throw error;
+    }
+    
     // Fallback to mock data on error
     const suggestions = mockSuggestions[type] || [];
     return suggestions.filter(s => 
@@ -140,13 +167,25 @@ export async function generatePlaylist(options: SearchOptions): Promise<Song[]> 
     const response = await fetch(`${CORS_PROXY}${encodeURIComponent(url)}`);
 
     if (!response.ok) {
-      throw new Error('CORS_NOT_ACTIVATED');
+      throw new CorsNotActivatedError('CORS_NOT_ACTIVATED');
+    }
+
+    // Check if response is HTML (expected for this endpoint)
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      throw new ApiResponseFormatError('Unexpected JSON response from playlist endpoint.');
     }
 
     const html = await response.text();
     return parseMusicFromHtml(html);
   } catch (error) {
     console.error('Error generating playlist:', error);
+    
+    // Re-throw custom errors
+    if (error instanceof CorsNotActivatedError || error instanceof ApiResponseFormatError) {
+      throw error;
+    }
+    
     // Fallback to mock data on error
     return mockPlaylistData;
   }
